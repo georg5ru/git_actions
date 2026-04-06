@@ -1,0 +1,70 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15
+    container_name: drf_db
+    restart: unless-stopped
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    env_file:
+      - .env
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+
+  redis:
+    image: redis:7
+    container_name: drf_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+
+  backend:
+    build: .
+    container_name: drf_backend
+    restart: unless-stopped
+    depends_on:
+      - db
+      - redis
+    volumes:
+      - .:/app          # монтируем код для удобства разработки
+    ports:
+      - "80:8000"
+    env_file:
+      - .env
+    command: >
+      sh -c "python manage.py migrate &&
+             python manage.py runserver 0.0.0.0:8000"
+
+  celery:
+    build: .
+    container_name: drf_celery
+    restart: unless-stopped
+    depends_on:
+      - backend
+      - redis
+    volumes:
+      - .:/app
+    env_file:
+      - .env
+    command: celery -A config worker --loglevel=info
+
+  celery-beat:
+    build: .
+    container_name: drf_celery_beat
+    restart: unless-stopped
+    depends_on:
+      - backend
+      - redis
+    volumes:
+      - .:/app
+    env_file:
+      - .env
+    command: celery -A config beat --loglevel=info
+
+volumes:
+  postgres_data:
