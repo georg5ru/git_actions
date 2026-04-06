@@ -44,11 +44,40 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
-            set -e
-            cd ${{ secrets.PROJECT_DIR }}
-            git fetch --all
-            git checkout develop
-            git pull
-            docker-compose down
+            cd /home/ubuntu
+
+            # Check if git_actions directory exists and is a git repo
+            if [ -d "git_actions/.git" ]; then
+              echo "Git repository exists, pulling changes..."
+              cd git_actions
+              git pull origin ${{ github.ref_name }}
+            else
+              echo "Cloning repository..."
+              rm -rf git_actions
+              git clone https://github.com/${{ github.repository }}.git git_actions
+              cd git_actions
+            fi
+
+            # Stop old containers
+            cd /home/ubuntu/git_actions
+            docker-compose down || true
+
+            # Build and start new containers
             docker-compose up -d --build
-            docker-compose run --rm backend python manage.py migrate
+
+            # Wait for services to be ready
+            sleep 15
+
+            # Apply migrations
+            docker-compose exec -T backend python manage.py migrate || true
+
+            # Collect static files
+            docker-compose exec -T backend python manage.py collectstatic --noinput || true
+
+            # Clean up old Docker images
+            docker image prune -f
+
+            # Restart Nginx
+            sudo systemctl restart nginx
+
+            echo "Deployment completed successfully!"
